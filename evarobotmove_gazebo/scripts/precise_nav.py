@@ -22,8 +22,6 @@ goal = Point()
 goal.x = 5.8
 goal.y = -2.8
 
-twist = Twist()
-
 LINX = 0.0 #Always forward linear velocity.
 PI = 3.14
 angz = 0
@@ -81,7 +79,6 @@ def main():
     while not rospy.is_shutdown():
         global robotpose
         global goal
-        global twist
         global theta
         global F
         global L
@@ -99,81 +96,94 @@ def main():
         distSize = math.sqrt(math.pow(dist.x,2) + math.pow(dist.y,2)) 
         rospy.loginfo(distSize)
 
-        if(distSize > 0.2):
+        if(distSize > 0.3):
             if(F<=0.6):
-                slowing = True   
+                slowing = True
+                LINX = 0.15   
+                if(L > 0.35 and R > 0.35 and distSize > 1):
+                    turningLeft = True
+                    angz = 0.8
+                    pubVel(LINX,angz)
+                elif((L<0.4 and R < 0.4 and distSize > 1) or (F < 0.25 and distSize > 1) or (L < 0.25 and distSize > 1) or (R < 0.25 and distSize > 1)):
+                    LINX = LINX-0.5
+                    pubVel(LINX,angz)
+                else: 
+                    angz = 0
+                    pubVel(LINX,angz)
+                    turningLeft = False
             else:
                 slowing = False
             
-            if(L<0.6):
+            if((F<0.6 and L<0.4) or L < 0.3):
                 turningRight = True
+                angz = -0.5
             else:
+                if (not slowing):
+                    if (distSize > 2):
+                        LINX = 0.5
+                    else:
+                        LINX = distSize/4
                 turningRight = False
 
-            if(R<0.6):
-                turningLeft = True    
+            if((F<0.6 and R<0.4) or R < 0.3):
+                turningLeft = True
+                angz = 0.5    
             else: 
+                if (not slowing):
+                    if (distSize > 2):
+                        LINX = 0.5
+                    else:
+                        LINX = distSize/4
                 turningLeft = False
+        else:
+            slowing = False
+            turningLeft = False
+            turningRight = False
             
-        if(distAngleZ - theta > 0.1):
-            twist.angular.z = 0.3
-            #twist.linear.x = 0
-            velocity_pub.publish(twist)
+        if(distAngleZ - theta > 0.1 and distSize > 0.2 and L > 0.3 and R > 0.3):
+            if(distAngleZ - theta > 0.5):
+                angz = 0.5
+            else:  
+                angz = 0.2
+            if (distSize > 2):
+                LINX = 0.5
+            else:
+                LINX = distSize/4
             rospy.loginfo("turning on the objective, error = "+str(distAngleZ-theta))
-        elif(distAngleZ - theta < -0.1):
-            twist.angular.z = -0.3
-            #twist.linear.x = 0
-            velocity_pub.publish(twist)
+        elif(distAngleZ - theta < -0.1 and distSize > 0.2 and L > 0.3 and R > 0.3):
+            if(distAngleZ - theta < -0.5):
+                angz = -0.5
+            else:  
+                angz = -0.2
+            if (distSize > 2):
+                LINX = 0.5
+            else:
+                LINX = distSize/4
             rospy.loginfo("turning on the objective, error = "+str(distAngleZ-theta))
         elif(distSize > 0.1):
             if(distSize > 2):
-                if(slowing):
-                    LINX = LINX/2 
-                    if L-R<0.1:
-                        angz= angz+0.2
-                    pubVel(LINX, angz)
-                elif(turningLeft):
-                    angz= angz-0.25
-                    pubVel(LINX, angz)
-                elif(turningRight):
-                    angz= angz+0.25
-                    pubVel(LINX, angz)
-                else:
-                    twist.linear.x = 0.5
-                    twist.angular.z = 0
-                    velocity_pub.publish(twist)
-                    rospy.loginfo("distance > 2 "+str(distSize))
+                if(not turningLeft and not turningRight and not slowing):
+                        LINX = 0.5
+                        angz = 0
+                        rospy.loginfo("distance > 2 "+str(distSize))     
             else:
-                if(slowing):
-                    LINX = LINX/2 
-                    if L-R<0.1:
-                        angz= angz+0.2
-                    pubVel(LINX, angz)
-                elif(turningLeft):
-                    angz= angz-0.25
-                    pubVel(LINX, angz)
-                elif(turningRight):
-                    angz= angz+0.25
-                    pubVel(LINX, angz)
-                else:
-                    twist.linear.x = distSize/4
-                    twist.angular.z = 0
-                    velocity_pub.publish(twist)
+                if(not turningLeft and not turningRight and not slowing):
+                    LINX = distSize/4
+                    angz = 0
                     rospy.loginfo("distance < 2 "+str(distSize))
         elif(distSize <= 0.1):
-            twist.linear.x = 0
-            twist.angular.z = 0
-            velocity_pub.publish(twist)
+            LINX = 0
+            angz = 0
             rospy.loginfo("objective reached")
             #rospy.signal_shutdown("objective reached")
             #sys.exit()
+        pubVel(LINX, angz)
         r.sleep()
 
 
 if __name__ == '__main__':
     try:
         velocity_pub = rospy.Publisher('cmd_vel', Twist, queue_size = 10)
-
         amcl_pose = rospy.Subscriber("amcl_pose",PoseWithCovarianceStamped,amclPoseSub)
         rospy.Subscriber("/cmd_vel",Twist, VelScan)
         rospy.Subscriber("/sonar1", sensor_msgs.msg.Range , SonarFScan)
@@ -186,8 +196,4 @@ if __name__ == '__main__':
         rospy.sleep(1)
 
     except rospy.ROSInterruptException:
-        global twist
-        twist.linear.x = 0
-        twist.angular.z = 0
-        velocity_pub.publish(twist)
         rospy.loginfo("Ctrl-C caught. Quitting")
